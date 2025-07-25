@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PDF Classifier</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 3rem auto; }
+    form { display: flex; gap: 1rem; flex-direction: column; }
+    .flash { padding: 0.8rem; margin-bottom: 1rem; border-radius: 6px; }
+    .flash.danger  { background: #ffc9c9; }
+    .flash.warning { background: #fff3c4; }
+  </style>
+</head>
+<body>
+  <h1>PDF&nbsp;Classifier</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form action="{{ url_for('predict') }}" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept="application/pdf" required>
+    <button type="submit">Classify</button>
+  </form>
+</body>
+</html>
