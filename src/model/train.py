@@ -1,208 +1,225 @@
 """
-Обучение нейронной сети для классификации текста
-(20\u00a0Newsgroups \u2192 7\u00a0суперкатегорий).
+Обучение нейронной сети для классификации текстов PDF документов.
 
-Скрипт можно запускать как модуль:
-    $ python -m src.model.train --config configs/default.yaml
-
-По-умолчанию используется встроенная конфигурация (см. ниже).
-Веса модели и Vectorizer сохраняются в директорию *artifacts/*.
+Использует dataset 20 Newsgroups и создает модель на Keras/TensorFlow.
 """
 from __future__ import annotations
 
-import argparse
-import json
 import pickle
-from collections import Counter
 from pathlib import Path
-from textwrap import shorten
-from typing import Any
+from typing import Tuple
 
 import numpy as np
 import tensorflow as tf
 from loguru import logger
 from sklearn.datasets import fetch_20newsgroups
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
-from tensorflow.keras import callbacks, layers as L, models
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adam
 
 from preprocessing.cleaner import preprocess
 
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-DEFAULT_CONFIG: dict[str, Any] = {
-    "max_tokens": 20_000,
-    "sequence_len": 300,
-    "embedding_dim": 128,
-    "rnn_units": 64,
-    "batch_size": 64,
+__all__ = ["train_model", "create_model", "prepare_data"]
+
+# Конфигурация модели
+MODEL_CONFIG = {
+    "max_features": 5000,
     "epochs": 10,
-    "learning_rate": 1e-3,
-    "patience": 3,
-    "val_split": 0.15,
-    "test_split": 0.15,
-    "seed": 42,
-    "super_categories": {
-        # newsgroup : super-class
-        "comp.graphics": "tech",
-        "comp.sys.ibm.pc.hardware": "tech",
-        "comp.sys.mac.hardware": "tech",
-        "comp.windows.x": "tech",
-        "comp.os.ms-windows.misc": "tech",
-        "sci.crypt": "sci",
-        "sci.electronics": "sci",
-        "sci.med": "sci",
-        "sci.space": "sci",
-        "rec.autos": "autos",
-        "rec.motorcycles": "autos",
-        "rec.sport.baseball": "sport",
-        "rec.sport.hockey": "sport",
-        "talk.politics.guns": "politics",
-        "talk.politics.mideast": "politics",
-        "talk.politics.misc": "politics",
-        "talk.religion.misc": "religion",
-        "alt.atheism": "religion",
-        "soc.religion.christian": "religion",
-        "misc.forsale": "sale",
-    },
+    "batch_size": 32,
+    "validation_split": 0.2,
+    "learning_rate": 0.001,
+    "dropout_rate": 0.3
 }
 
-ARTIFACTS = Path("artifacts")
-ARTIFACTS.mkdir(exist_ok=True)
+ARTIFACTS_DIR = Path("artifacts")
+ARTIFACTS_DIR.mkdir(exist_ok=True)
 
 
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train PDF text classifier.")
-    p.add_argument(
-        "--config",
-        type=Path,
-        help="Path to JSON/YAML config overriding defaults.",
+def prepare_data() -> Tuple[np.ndarray, np.ndarray, list[str], object]:
+    """
+    Загружает и подготавливает данные 20 Newsgroups для обучения.
+    
+    Returns:
+        X: Векторизованные тексты
+        y: Метки классов
+        labels: Названия категорий
+        vectorizer: Обученный векторизатор
+    """
+    logger.info("Загрузка датасета 20 Newsgroups...")
+    
+    # Загружаем данные
+    newsgroups_train = fetch_20newsgroups(
+        subset='train',
+        remove=('headers', 'footers', 'quotes'),
+        random_state=42
     )
-    return p.parse_args()
-
-
-def _load_config(path: Path | None) -> dict[str, Any]:
-    """Merge user config over defaults (supports JSON and YAML)."""
-    if path is None:
-        return DEFAULT_CONFIG
-    if path.suffix.lower() in {".json"}:
-        with open(path, "r", encoding="utf-8") as fh:
-            user_cfg = json.load(fh)
-    elif path.suffix.lower() in {".yaml", ".yml"}:
-        import yaml  # lazy import to keep dependency optional
-
-        with open(path, "r", encoding="utf-8") as fh:
-            user_cfg = yaml.safe_load(fh)
-    else:
-        raise ValueError("Config must be .json or .yaml")
-    # recursive merge (shallow is enough here)
-    merged = DEFAULT_CONFIG | user_cfg
-    return merged
-
-
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-def _group_labels(orig_targets: list[int], names: list[str], mapping: dict[str, str]):
-    """Collapse 20 classes \u2192 6-7\u00a0суперкатегорий."""
-    new_targets = [mapping[names[i]] for i in orig_targets]
-    unique = sorted(set(new_targets))
-    idx = {name: i for i, name in enumerate(unique)}
-    return np.array([idx[t] for t in new_targets]), unique
-
-
-def _prepare_dataset(cfg: dict[str, Any]):
-    logger.info("Fetching 20\u00a0Newsgroups…")
-    data = fetch_20newsgroups(remove=("headers", "footers", "quotes"))
-    y, labels = _group_labels(data.target.tolist(), data.target_names, cfg["super_categories"])
-    logger.info("Classes: %s", Counter(y))
-    # Preprocess \u2192  space-joined tokens
-    X = [" ".join(preprocess(t)) for t in data.data]
-    test_size = cfg["test_split"] + cfg["val_split"]
-    X_train, X_tmp, y_train, y_tmp = train_test_split(
-        X,
-        y,
-        test_size=test_size,
-        random_state=cfg["seed"],
-        stratify=y,
+    
+    newsgroups_test = fetch_20newsgroups(
+        subset='test',
+        remove=('headers', 'footers', 'quotes'),
+        random_state=42
     )
-    val_size = cfg["val_split"] / test_size
-    X_val, X_test, y_val, y_test = train_test_split(
-        X_tmp,
-        y_tmp,
-        test_size=val_size,
-        random_state=cfg["seed"],
-        stratify=y_tmp,
+    
+    # Объединяем train и test для большего объема данных
+    texts = list(newsgroups_train.data) + list(newsgroups_test.data)
+    targets = list(newsgroups_train.target) + list(newsgroups_test.target)
+    
+    logger.info(f"Загружено {len(texts)} документов в {len(newsgroups_train.target_names)} категориях")
+    
+    # Предобработка текстов
+    logger.info("Предобработка текстов...")
+    processed_texts = []
+    for i, text in enumerate(texts):
+        if i % 1000 == 0:
+            logger.debug(f"Обработано {i}/{len(texts)} документов")
+        
+        # Используем нашу функцию предобработки
+        try:
+            processed_tokens = preprocess(text)
+            processed_text = " ".join(processed_tokens)
+            processed_texts.append(processed_text)
+        except Exception as e:
+            logger.warning(f"Ошибка обработки документа {i}: {e}")
+            processed_texts.append("")  # Пустой текст для проблемных документов
+    
+    # Векторизация с TF-IDF
+    logger.info("Векторизация текстов с TF-IDF...")
+    vectorizer = TfidfVectorizer(
+        max_features=MODEL_CONFIG["max_features"],
+        ngram_range=(1, 2),
+        min_df=5,
+        max_df=0.7,
+        stop_words='english'
     )
-    return (X_train, y_train), (X_val, y_val), (X_test, y_test), labels
+    
+    X = vectorizer.fit_transform(processed_texts)
+    y = np.array(targets)
+    
+    logger.info(f"Форма данных: X={X.shape}, y={y.shape}")
+    logger.info(f"Размер словаря: {len(vectorizer.vocabulary_)}")
+    
+    return X.toarray(), y, newsgroups_train.target_names, vectorizer
 
 
-def _build_model(cfg: dict[str, Any], num_classes: int, vectorizer: tf.keras.layers.TextVectorization):
-    model = models.Sequential(
-        [
-            vectorizer,
-            L.Embedding(cfg["max_tokens"], cfg["embedding_dim"]),
-            L.Bidirectional(L.LSTM(cfg["rnn_units"], dropout=0.2)),
-            L.Dense(num_classes, activation="softmax"),
-        ]
-    )
+def create_model(input_dim: int, num_classes: int) -> tf.keras.Model:
+    """
+    Создает нейронную сеть для классификации текста.
+    
+    Args:
+        input_dim: Размерность входных данных
+        num_classes: Количество классов
+        
+    Returns:
+        Скомпилированная модель Keras
+    """
+    logger.info(f"Создание модели: input_dim={input_dim}, num_classes={num_classes}")
+    
+    model = Sequential([
+        Dense(512, activation='relu', input_shape=(input_dim,)),
+        Dropout(MODEL_CONFIG["dropout_rate"]),
+        Dense(256, activation='relu'),
+        Dropout(MODEL_CONFIG["dropout_rate"]),
+        Dense(128, activation='relu'),
+        Dropout(MODEL_CONFIG["dropout_rate"]),
+        Dense(64, activation='relu'),
+        Dense(num_classes, activation='softmax')
+    ])
+    
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(cfg["learning_rate"]),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
+        optimizer=Adam(learning_rate=MODEL_CONFIG["learning_rate"]),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
     )
+    
+    logger.info("Архитектура модели:")
+    model.summary(print_fn=logger.info)
+    
     return model
 
 
-def main() -> None:
-    args = _parse_args()
-    cfg = _load_config(args.config)
-    logger.info("Config: %s", cfg)
-
-    (X_train, y_train), (X_val, y_val), (X_test, y_test), labels = _prepare_dataset(cfg)
-
-    vectorizer = tf.keras.layers.TextVectorization(
-        max_tokens=cfg["max_tokens"],
-        output_sequence_length=cfg["sequence_len"],
-        standardize=None,  # уже пред-обработано
+def train_model() -> None:
+    """
+    Полный цикл обучения модели и сохранения артефактов.
+    """
+    logger.info("Начало обучения модели...")
+    
+    # Подготовка данных
+    X, y, labels, vectorizer = prepare_data()
+    
+    # Разделение на train/test
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
-    vectorizer.adapt(X_train)
-
-    model = _build_model(cfg, len(labels), vectorizer)
-
-    logger.info("Starting training: %d samples, %d classes", len(X_train), len(labels))
+    
+    logger.info(f"Train: {X_train.shape}, Test: {X_test.shape}")
+    
+    # Создание модели
+    model = create_model(X_train.shape[1], len(labels))
+    
+    # Callbacks для обучения
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss',
+            patience=3,
+            restore_best_weights=True
+        ),
+        tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=2,
+            min_lr=1e-6
+        )
+    ]
+    
+    # Обучение
+    logger.info("Начало обучения...")
     history = model.fit(
-        X_train,
-        y_train,
-        epochs=cfg["epochs"],
-        batch_size=cfg["batch_size"],
-        validation_data=(X_val, y_val),
-        callbacks=[
-            callbacks.EarlyStopping(
-                patience=cfg["patience"], restore_best_weights=True, verbose=1
-            ),
-        ],
-        verbose=2,
+        X_train, y_train,
+        epochs=MODEL_CONFIG["epochs"],
+        batch_size=MODEL_CONFIG["batch_size"],
+        validation_split=MODEL_CONFIG["validation_split"],
+        callbacks=callbacks,
+        verbose=1
     )
-
-    logger.info(
-        "Best val_acc: %.3f",
-        max(history.history["val_accuracy"]),
-    )
-    test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
-    logger.success("Test accuracy: %.3f  •  loss: %.3f", test_acc, test_loss)
-
-    # \u2014— Сохранение ——————————————————————————————————
-    model_path = ARTIFACTS / "model.keras"
+    
+    # Оценка на тестовой выборке
+    logger.info("Оценка модели на тестовых данных...")
+    test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=0)
+    logger.info(f"Тестовая точность: {test_accuracy:.4f}")
+    logger.info(f"Тестовая потеря: {test_loss:.4f}")
+    
+    # Сохранение артефактов
+    logger.info("Сохранение модели и артефактов...")
+    
+    # Сохранение модели
+    model_path = ARTIFACTS_DIR / "model.keras"
     model.save(model_path)
-    with open(ARTIFACTS / "vectorizer.pkl", "wb") as fh:
-        pickle.dump(vectorizer, fh)
-    with open(ARTIFACTS / "labels.pkl", "wb") as fh:
-        pickle.dump(labels, fh)
-    logger.info("Artifacts saved to %s", ARTIFACTS.resolve())
+    logger.info(f"Модель сохранена: {model_path}")
+    
+    # Сохранение векторизатора
+    vectorizer_path = ARTIFACTS_DIR / "vectorizer.pkl"
+    with open(vectorizer_path, "wb") as f:
+        pickle.dump(vectorizer, f)
+    logger.info(f"Векторизатор сохранен: {vectorizer_path}")
+    
+    # Сохранение меток классов
+    labels_path = ARTIFACTS_DIR / "labels.pkl"
+    with open(labels_path, "wb") as f:
+        pickle.dump(labels, f)
+    logger.info(f"Метки классов сохранены: {labels_path}")
+    
+    # Сохранение истории обучения
+    history_path = ARTIFACTS_DIR / "training_history.pkl"
+    with open(history_path, "wb") as f:
+        pickle.dump(history.history, f)
+    logger.info(f"История обучения сохранена: {history_path}")
+    
+    logger.success("Обучение завершено успешно!")
+    
+    return model, vectorizer, labels
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.warning("Interrupted by user")
+    train_model()

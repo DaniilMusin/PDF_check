@@ -1,18 +1,269 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Prediction</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Результат классификации</title>
   <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 3rem auto; text-align: center; }
-    a { display: inline-block; margin-top: 2rem; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      padding: 3rem;
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+      animation: slideUp 0.5s ease-out;
+    }
+    
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .success-icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+      animation: bounce 0.6s ease-in-out;
+    }
+    
+    @keyframes bounce {
+      0%, 20%, 60%, 100% {
+        transform: translateY(0);
+      }
+      40% {
+        transform: translateY(-10px);
+      }
+      80% {
+        transform: translateY(-5px);
+      }
+    }
+    
+    h1 {
+      color: #2d3748;
+      font-size: 2rem;
+      margin-bottom: 2rem;
+      font-weight: 700;
+    }
+    
+    .result-card {
+      background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+      padding: 2rem;
+      border-radius: 16px;
+      margin-bottom: 2rem;
+      border: 1px solid #e2e8f0;
+    }
+    
+    .category-title {
+      color: #4a5568;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 0.5rem;
+    }
+    
+    .category-name {
+      color: #2d3748;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      word-break: break-word;
+    }
+    
+    .probability-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    
+    .probability-label {
+      color: #718096;
+      font-weight: 600;
+    }
+    
+    .probability-value {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 25px;
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+    
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 1rem;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 4px;
+      transition: width 1s ease-out;
+      animation: fillBar 1s ease-out;
+    }
+    
+    @keyframes fillBar {
+      from { width: 0%; }
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      padding: 1rem 2rem;
+      border-radius: 50px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .btn-secondary {
+      background: white;
+      color: #4a5568;
+      border: 2px solid #e2e8f0;
+    }
+    
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    
+    .btn-primary:hover {
+      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    }
+    
+    .category-description {
+      color: #718096;
+      font-style: italic;
+      margin-top: 1rem;
+      font-size: 0.95rem;
+    }
+    
+    @media (max-width: 480px) {
+      .container {
+        padding: 2rem 1.5rem;
+        margin: 10px;
+      }
+      
+      .result-card {
+        padding: 1.5rem;
+      }
+      
+      .category-name {
+        font-size: 1.4rem;
+      }
+      
+      .action-buttons {
+        flex-direction: column;
+      }
+      
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1>Predicted category</h1>
-  <h2>{{ category }}</h2>
-  <p>Probability: <strong>{{ probability }}</strong></p>
+  <div class="container">
+    <div class="success-icon">🎯</div>
+    <h1>Классификация завершена!</h1>
+    
+    <div class="result-card">
+      <div class="category-title">Предсказанная категория</div>
+      <div class="category-name">{{ category }}</div>
+      
+      <div class="probability-container">
+        <span class="probability-label">Уверенность:</span>
+        <span class="probability-value">{{ probability }}</span>
+      </div>
+      
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: {{ probability.rstrip('%') }}%"></div>
+      </div>
+      
+      <div class="category-description">
+        Документ успешно классифицирован с помощью машинного обучения
+      </div>
+    </div>
+    
+    <div class="action-buttons">
+      <a href="{{ url_for('index') }}" class="btn btn-primary">
+        📄 Классифицировать другой PDF
+      </a>
+      <button onclick="window.print()" class="btn btn-secondary">
+        🖨️ Распечатать результат
+      </button>
+    </div>
+  </div>
 
-  <a href="{{ url_for('index') }}">Classify another PDF</a>
+  <script>
+    // Add some interactive feedback
+    document.addEventListener('DOMContentLoaded', function() {
+      const progressBar = document.querySelector('.progress-fill');
+      const probabilityText = '{{ probability }}';
+      const percentage = parseFloat(probabilityText.replace('%', ''));
+      
+      // Animate the progress bar
+      setTimeout(() => {
+        progressBar.style.width = percentage + '%';
+      }, 100);
+      
+      // Add click animation to buttons
+      document.querySelectorAll('.btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          this.style.transform = 'scale(0.95)';
+          setTimeout(() => {
+            this.style.transform = '';
+          }, 150);
+        });
+      });
+    });
+  </script>
 </body>
 </html>

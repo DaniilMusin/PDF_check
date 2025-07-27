@@ -30,13 +30,14 @@ def load_model_and_vectorizer() -> Tuple["tf.keras.Model", Any, list[str]]:
     Returns
     -------
     model : tf.keras.Model
-    vectorizer : tf.keras.layers.TextVectorization
+    vectorizer : sklearn.feature_extraction.text.TfidfVectorizer
     labels : list[str]
     """
     import tensorflow as tf
+    
     if not MODEL_FILE.exists():
         raise FileNotFoundError(
-            f"Model file not found: {MODEL_FILE}. Run training first."
+            f"Model file not found: {MODEL_FILE}. Run training first with: python src/model/train.py"
         )
 
     logger.debug("Loading model from %s…", MODEL_FILE.name)

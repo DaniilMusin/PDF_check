@@ -1,4 +1,0 @@
-max_tokens: 20000
-sequence_len: 300
-epochs: 10
-batch: 64

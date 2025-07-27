@@ -47,7 +47,11 @@ def _nlp_en():
 
 @lru_cache(maxsize=1)
 def _nlp_ru():
-    return spacy.load("ru_core_news_sm", disable=["parser", "ner", "textcat"])
+    try:
+        return spacy.load("ru_core_news_sm", disable=["parser", "ner", "textcat"])
+    except OSError:
+        logger.warning("Russian spaCy model not found, falling back to English model")
+        return _nlp_en()
 
 
 def _select_nlp(text: str) -> spacy.language.Language:
